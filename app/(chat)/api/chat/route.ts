@@ -26,7 +26,7 @@ import {
 } from "@/lib/ai/models";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { getLanguageModel } from "@/lib/ai/providers";
-import { streamText } from "@/lib/ai/raindrop";
+import { raindrop, streamText } from "@/lib/ai/raindrop";
 import { createDocument } from "@/lib/ai/tools/create-document";
 import { editDocument } from "@/lib/ai/tools/edit-document";
 import { getWeather } from "@/lib/ai/tools/get-weather";
@@ -270,10 +270,12 @@ export async function POST(request: Request) {
         };
 
         // Raindrop reads the turn's user and conversation from this scope (AI SDK v7 telemetry has no metadata field).
+        // The user message id is the event id, so votes on the reply can be sent as signals on this event.
         const result = runWithRaindropCallMetadata(
           {
             rawMetadata: eventMetadata({
               convoId: id,
+              eventId: message?.role === "user" ? message.id : undefined,
               eventName: "chat_message",
               userId: session.user.id,
             }),
@@ -414,6 +416,15 @@ export async function POST(request: Request) {
         return "Oops, an error occurred!";
       },
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
+    });
+
+    // Send the user's traits and any buffered Raindrop events and traces before the function ends.
+    after(async () => {
+      await raindrop.users.identify({
+        traits: { type: userType },
+        userId: session.user.id,
+      });
+      await raindrop.flush();
     });
 
     return createUIMessageStreamResponse({

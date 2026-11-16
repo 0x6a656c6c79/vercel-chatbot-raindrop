@@ -1,8 +1,11 @@
+import { after } from "next/server";
 import { z } from "zod";
 import { auth } from "@/app/(auth)/auth";
+import { raindrop } from "@/lib/ai/raindrop";
 import {
   getChatById,
   getMessageById,
+  getMessagesByChatId,
   getVotesByChatId,
   voteMessage,
 } from "@/lib/db/queries";
@@ -87,6 +90,25 @@ export async function PATCH(request: Request) {
     messageId,
     type,
   });
+
+  // The chat route uses the user message id as the Raindrop event id, so the vote goes on the turn this reply answered.
+  const chatMessages = await getMessagesByChatId({ id: chatId });
+  const turn = chatMessages
+    .slice(
+      0,
+      chatMessages.findIndex((m) => m.id === messageId)
+    )
+    .findLast((m) => m.role === "user");
+
+  if (turn) {
+    after(() =>
+      raindrop.signals.track({
+        eventId: turn.id,
+        name: type === "up" ? "thumbs_up" : "thumbs_down",
+        sentiment: type === "up" ? "POSITIVE" : "NEGATIVE",
+      })
+    );
+  }
 
   return new Response("Message voted", { status: 200 });
 }
